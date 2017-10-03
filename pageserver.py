@@ -13,6 +13,8 @@
   program is run).
 """
 
+import os        # file system nav / file manipulation
+import re        # regualar expressions for sorting file extensions
 import config    # Configure from .ini files and command line
 import logging   # Better than print statements
 logging.basicConfig(format='%(levelname)s:%(message)s',
@@ -23,6 +25,7 @@ log = logging.getLogger(__name__)
 import socket    # Basic TCP/IP communication on the internet
 import _thread   # Response computation runs concurrently with main program
 
+#DOCROOT = config.configuration().DOCROOT
 
 def listen(portnum):
     """
@@ -54,19 +57,32 @@ def serve(sock, func):
         to the connected client, running concurrently in its own thread.
     """
     while True:
-        log.info("Attempting to accept a connection on {}".format(sock))
+        print("Attempting to accept a connection on {}".format(sock))
         (clientsocket, address) = sock.accept()
         _thread.start_new_thread(func, (clientsocket,))
 
+def pathcheck(file):
+    """
+    checks if path is correct 
+    """
+    return os.path.isfile(file)
 
-##
-# Starter version only serves cat pictures. In fact, only a
-# particular cat picture.  This one.
-##
-CAT = """
-     ^ ^
-   =(   )=
-"""
+def pathstring(file):
+    #returns path
+    with open(file, 'r') as openfile:
+        strng = openfile.read()
+    return strng
+
+
+def validcheck(filepath):
+    """
+    returns true if path is valid (no '//', '~', or '..')
+    """
+    invalid = str(re.findall(r'\W{1,2}', filepath)) #thank you regex
+    invalidinput = not ("//" in invalid or "~" in invalid  or ".." in invalid)
+    extension = filepath.split('.')[-1]
+    ext = "html" == extension or "css" == extension
+    return invalidinput and ext
 
 # HTTP response codes, as the strings we will actually send.
 # See:  https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
@@ -77,34 +93,47 @@ STATUS_FORBIDDEN = "HTTP/1.0 403 Forbidden\n\n"
 STATUS_NOT_FOUND = "HTTP/1.0 404 Not Found\n\n"
 STATUS_NOT_IMPLEMENTED = "HTTP/1.0 401 Not Implemented\n\n"
 
-
-def respond(sock):
+def respond(sock):#change
     """
     This server responds only to GET requests (not PUT, POST, or UPDATE).
     Any valid GET request is answered with an ascii graphic of a cat.
+
+    basically;
+    if the second part of the GET request contains a ~, //, or .. it will be 
+    served a 403 code.
+    if it tries to reach a page that does not exist, it will be served a 404 code.
+    if it tries to reach a .css or .html page that DOES exist (in the directory 'pages'),
+    it will be served the desired page.
+    if it is not served a GET request, it is served a 401.
     """
     sent = 0
     request = sock.recv(1024)  # We accept only short requests
     request = str(request, encoding='utf-8', errors='strict')
-    log.info("--- Received request ----")
-    log.info("Request was {}\n***\n".format(request))
+    print("\nRequest was {}\n".format(request))
 
     parts = request.split()
     if len(parts) > 1 and parts[0] == "GET":
         transmit(STATUS_OK, sock)
-        transmit(CAT, sock)
+
+        filepath = "pages" + parts[1]
+        if not pathcheck(filepath):
+            transmit((STATUS_NOT_FOUND), sock)
+        elif not validcheck(filepath):
+            transmit((STATUS_FORBIDDEN), sock)
+        else:
+            webpage = pathstring(filepath)
+            transmit(webpage, sock)
     else:
-        log.info("Unhandled request: {}".format(request))
-        transmit(STATUS_NOT_IMPLEMENTED, sock)
+        transmit(STATUS_NOT_IMPLEMENTED, sock)        
         transmit("\nI don't handle this request: {}\n".format(request), sock)
 
     sock.shutdown(socket.SHUT_RDWR)
     sock.close()
+
     return
 
-
 def transmit(msg, sock):
-    """It might take several sends to get the whole message out"""
+    """It might take several sends to get the whole buffer out"""
     sent = 0
     while sent < len(msg):
         buff = bytes(msg[sent:], encoding="utf-8")
@@ -115,7 +144,6 @@ def transmit(msg, sock):
 # Run from command line
 #
 ###
-
 
 def get_options():
     """
